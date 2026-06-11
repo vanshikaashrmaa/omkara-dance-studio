@@ -1,4 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
+import {
+  collection, doc, getDocs, addDoc, updateDoc, deleteDoc, onSnapshot, setDoc
+} from 'firebase/firestore'
+import { db } from '../firebase'
 
 const StudioContext = createContext(null)
 
@@ -33,7 +37,7 @@ const SAMPLE_STUDENTS = [
     dueDays: 36,
     performance: { Stamina: 70, Strength: 65, Flexibility: 55, Coordination: 60 },
     notes: [
-      { id: 'n3', date: '2026-05-10T10:00:00', text: 'Attendance inconsistent. Needs motivation. Discuss schedule flexibility.' }
+      { id: 'n3', date: '2026-05-10T10:00:00', text: 'Attendance inconsistent. Needs motivation.' }
     ]
   },
   {
@@ -67,57 +71,63 @@ const SAMPLE_STUDENTS = [
 ]
 
 export function StudioProvider({ children }) {
-  const [students, setStudents] = useState(() => {
-    try {
-      const stored = localStorage.getItem('omkara_students')
-      return stored ? JSON.parse(stored) : SAMPLE_STUDENTS
-    } catch {
-      return SAMPLE_STUDENTS
-    }
-  })
+  const [students, setStudents] = useState([])
+  const [loading, setLoading] = useState(true)
 
+  // Live sync from Firestore
   useEffect(() => {
-    localStorage.setItem('omkara_students', JSON.stringify(students))
-  }, [students])
+    const unsub = onSnapshot(collection(db, 'students'), async (snapshot) => {
+      if (snapshot.empty) {
+        // First time — seed sample data
+        for (const s of SAMPLE_STUDENTS) {
+          await setDoc(doc(db, 'students', s.id), s)
+        }
+      } else {
+        const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
+        setStudents(data)
+        setLoading(false)
+      }
+    })
+    return () => unsub()
+  }, [])
 
-  const addStudent = (data) => {
+  const addStudent = async (data) => {
     const student = {
       ...data,
-      id: Date.now().toString(),
       joinDate: new Date().toISOString().split('T')[0],
       performance: getDefaultPerformance(data.package),
       notes: [],
       dueDays: 0,
     }
-    setStudents(prev => [student, ...prev])
-    return student.id
+    const ref = await addDoc(collection(db, 'students'), student)
+    return ref.id
   }
 
-  const updateStudent = (id, data) => {
-    setStudents(prev => prev.map(s => s.id === id ? { ...s, ...data } : s))
+  const updateStudent = async (id, data) => {
+    await updateDoc(doc(db, 'students', id), data)
   }
 
-  const deleteStudent = (id) => {
-    setStudents(prev => prev.filter(s => s.id !== id))
+  const deleteStudent = async (id) => {
+    await deleteDoc(doc(db, 'students', id))
   }
 
-  const addNote = (studentId, text) => {
+  const addNote = async (studentId, text) => {
+    const student = students.find(s => s.id === studentId)
+    if (!student) return
     const note = { id: Date.now().toString(), date: new Date().toISOString(), text }
-    setStudents(prev => prev.map(s =>
-      s.id === studentId ? { ...s, notes: [note, ...s.notes] } : s
-    ))
+    const notes = [note, ...(student.notes || [])]
+    await updateDoc(doc(db, 'students', studentId), { notes })
   }
 
-  const deleteNote = (studentId, noteId) => {
-    setStudents(prev => prev.map(s =>
-      s.id === studentId ? { ...s, notes: s.notes.filter(n => n.id !== noteId) } : s
-    ))
+  const deleteNote = async (studentId, noteId) => {
+    const student = students.find(s => s.id === studentId)
+    if (!student) return
+    const notes = student.notes.filter(n => n.id !== noteId)
+    await updateDoc(doc(db, 'students', studentId), { notes })
   }
 
-  const updatePerformance = (studentId, performance) => {
-    setStudents(prev => prev.map(s =>
-      s.id === studentId ? { ...s, performance } : s
-    ))
+  const updatePerformance = async (studentId, performance) => {
+    await updateDoc(doc(db, 'students', studentId), { performance })
   }
 
   const getStudent = (id) => students.find(s => s.id === id)
@@ -137,7 +147,7 @@ export function StudioProvider({ children }) {
 
   return (
     <StudioContext.Provider value={{
-      students, stats,
+      students, stats, loading,
       addStudent, updateStudent, deleteStudent,
       addNote, deleteNote, updatePerformance, getStudent
     }}>
