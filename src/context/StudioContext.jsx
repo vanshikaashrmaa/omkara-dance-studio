@@ -75,18 +75,13 @@ export function StudioProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   // Live sync from Firestore
+  // Live sync from Firestore
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'students'), async (snapshot) => {
-      if (snapshot.empty) {
-        // First time — seed sample data
-        for (const s of SAMPLE_STUDENTS) {
-          await setDoc(doc(db, 'students', s.id), s)
-        }
-      } else {
-        const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
-        setStudents(data)
-        setLoading(false)
-      }
+    const unsub = onSnapshot(collection(db, 'students'), (snapshot) => {
+      // Just fetch the data, even if it is empty!
+      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
+      setStudents(data)
+      setLoading(false)
     })
     return () => unsub()
   }, [])
